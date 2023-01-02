@@ -12,3 +12,6 @@ _deps
 
 build/
 
+*.gitignore
+*.code-workspace
+*.DS_Store
