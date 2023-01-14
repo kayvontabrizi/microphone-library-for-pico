@@ -10,6 +10,8 @@
 
 #include "hardware/pio.h"
 
+#define N_CHANNELS 4
+
 typedef void (*pdm_samples_ready_handler_t)(void);
 
 struct pdm_microphone_config {

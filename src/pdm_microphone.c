@@ -44,7 +44,7 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         return -1;
     }
 
-    pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8);
+    pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * N_CHANNELS;
 
     for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
         pdm_mic.raw_buffer[i] = malloc(pdm_mic.raw_buffer_size);
@@ -96,8 +96,8 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
     pdm_mic.filter.Fs = config->sample_rate;
     pdm_mic.filter.LP_HZ = config->sample_rate / 2;
     pdm_mic.filter.HP_HZ = 10;
-    pdm_mic.filter.In_MicChannels = 1;
-    pdm_mic.filter.Out_MicChannels = 1;
+    pdm_mic.filter.In_MicChannels = N_CHANNELS;
+    pdm_mic.filter.Out_MicChannels = N_CHANNELS;
     pdm_mic.filter.Decimation = PDM_DECIMATION;
     pdm_mic.filter.MaxVolume = 64;
     pdm_mic.filter.Gain = 16;
@@ -218,7 +218,7 @@ void pdm_microphone_set_filter_volume(uint16_t volume) {
 }
 
 int pdm_microphone_read(int16_t* buffer, size_t samples) {
-    int filter_stride = (pdm_mic.filter.Fs / 1000);
+    int filter_stride = N_CHANNELS*(pdm_mic.filter.Fs / 1000); // buffer is interleaved!
     samples = (samples / filter_stride) * filter_stride;
 
     if (samples > pdm_mic.config.sample_buffer_size) {
@@ -229,23 +229,29 @@ int pdm_microphone_read(int16_t* buffer, size_t samples) {
         return 0;
     }
 
-    uint8_t* in = pdm_mic.raw_buffer[pdm_mic.raw_buffer_read_index];
-    int16_t* out = buffer;
+    for (int j = 0; j < N_CHANNELS; j++) {
+        uint8_t* in = pdm_mic.raw_buffer[pdm_mic.raw_buffer_read_index];
+        int16_t* out = buffer;
 
-    pdm_mic.raw_buffer_read_index++;
+        // offset by channel #
+        in += j;
+        out += j;
 
-    for (int i = 0; i < samples; i += filter_stride) {
+        for (int i = 0; i < samples; i += filter_stride) {
 #if PDM_DECIMATION == 64
-        Open_PDM_Filter_64(in, out, pdm_mic.filter_volume, &pdm_mic.filter);
+            Open_PDM_Filter_64(in, out, pdm_mic.filter_volume, &pdm_mic.filter);
 #elif PDM_DECIMATION == 128
-        Open_PDM_Filter_128(in, out, pdm_mic.filter_volume, &pdm_mic.filter);
+            Open_PDM_Filter_128(in, out, pdm_mic.filter_volume, &pdm_mic.filter);
 #else
-        #error "Unsupported PDM_DECIMATION value!"
+            #error "Unsupported PDM_DECIMATION value!"
 #endif
 
-        in += filter_stride * (PDM_DECIMATION / 8);
-        out += filter_stride;
+            in += filter_stride * (PDM_DECIMATION / 8);
+            out += filter_stride;
+        }
     }
+
+    pdm_mic.raw_buffer_read_index++;
 
     return samples;
 }

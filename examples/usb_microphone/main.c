@@ -18,8 +18,8 @@
 
 // configuration
 const struct pdm_microphone_config config = {
-  .gpio_data = 2,
-  .gpio_clk = 3,
+  .gpio_clk = 2,
+  .gpio_data = 3,
   .pio = pio0,
   .pio_sm = 0,
   .sample_rate = SAMPLE_RATE,
@@ -27,7 +27,7 @@ const struct pdm_microphone_config config = {
 };
 
 // variables
-uint16_t sample_buffer[SAMPLE_BUFFER_SIZE];
+uint16_t sample_buffer[SAMPLE_BUFFER_SIZE*N_CHANNELS];
 
 // callback functions
 void on_pdm_samples_ready();
