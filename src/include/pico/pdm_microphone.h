@@ -10,6 +10,7 @@
 
 #include "hardware/pio.h"
 
+// TODO: MUST MATCH CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX
 #define N_CHANNELS 4
 
 typedef void (*pdm_samples_ready_handler_t)(void);
@@ -34,6 +35,6 @@ void pdm_microphone_set_filter_max_volume(uint8_t max_volume);
 void pdm_microphone_set_filter_gain(uint8_t gain);
 void pdm_microphone_set_filter_volume(uint16_t volume);
 
-int pdm_microphone_read(int16_t* buffer, size_t samples);
+int pdm_microphone_read(int16_t* buffer, size_t n_samples);
 
 #endif
