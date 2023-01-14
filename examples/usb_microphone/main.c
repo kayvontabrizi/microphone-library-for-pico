@@ -27,7 +27,7 @@ const struct pdm_microphone_config config = {
 };
 
 // variables
-uint16_t sample_buffer[SAMPLE_BUFFER_SIZE];
+uint16_t sample_buffer[SAMPLE_BUFFER_SIZE*4];
 
 // callback functions
 void on_pdm_samples_ready();
@@ -67,5 +67,5 @@ void on_usb_microphone_tx_ready()
   // to be transmitted.
   //
   // Write local buffer to the USB microphone
-  usb_microphone_write(sample_buffer, sizeof(sample_buffer));
+  usb_microphone_write(sample_buffer, sizeof(sample_buffer)/4);
 }

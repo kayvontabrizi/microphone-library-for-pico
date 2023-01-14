@@ -21,8 +21,6 @@
 #define PDM_DECIMATION       64
 #define PDM_RAW_BUFFER_COUNT 2
 
-#define TMP_N_CHANNELS 1
-
 static struct {
     struct pdm_microphone_config config;
     int dma_channel;
@@ -31,7 +29,7 @@ static struct {
     volatile int raw_buffer_read_index;
     uint raw_buffer_size;
     uint dma_irq;
-    TPDMFilter_InitStruct filter;
+    TPDMFilter_InitStruct filters[4];
     uint16_t filter_volume;
     pdm_samples_ready_handler_t samples_ready_handler;
 } pdm_mic;
@@ -46,7 +44,7 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         return -1;
     }
 
-    pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * TMP_N_CHANNELS;
+    pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * 2;
 
     for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
         pdm_mic.raw_buffer[i] = malloc(pdm_mic.raw_buffer_size);
@@ -79,7 +77,7 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
 
     dma_channel_config dma_channel_cfg = dma_channel_get_default_config(pdm_mic.dma_channel);
 
-    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_8);
+    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_16);
     channel_config_set_read_increment(&dma_channel_cfg, false);
     channel_config_set_write_increment(&dma_channel_cfg, true);
     channel_config_set_dreq(&dma_channel_cfg, pio_get_dreq(config->pio, config->pio_sm, false));
@@ -95,16 +93,19 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         false
     );
 
-    pdm_mic.filter.Fs = config->sample_rate;
-    pdm_mic.filter.LP_HZ = config->sample_rate / 2;
-    pdm_mic.filter.HP_HZ = 10;
-    pdm_mic.filter.In_MicChannels = 1;
-    pdm_mic.filter.Out_MicChannels = 1;
-    pdm_mic.filter.Decimation = PDM_DECIMATION;
-    pdm_mic.filter.MaxVolume = 64;
-    pdm_mic.filter.Gain = 16;
+    // TODO: avoid four separate filters
+    for (uint i = 0; i < 4; i++) {
+        pdm_mic.filters[i].Fs = config->sample_rate;
+        pdm_mic.filters[i].LP_HZ = config->sample_rate / 2;
+        pdm_mic.filters[i].HP_HZ = 10;
+        pdm_mic.filters[i].In_MicChannels = 1;
+        pdm_mic.filters[i].Out_MicChannels = 1;
+        pdm_mic.filters[i].Decimation = PDM_DECIMATION;
+        pdm_mic.filters[i].MaxVolume = 64;
+        pdm_mic.filters[i].Gain = 16;
+    }
 
-    pdm_mic.filter_volume = pdm_mic.filter.MaxVolume;
+    pdm_mic.filter_volume = pdm_mic.filters[0].MaxVolume;
 }
 
 void pdm_microphone_deinit() {
@@ -135,7 +136,10 @@ int pdm_microphone_start() {
         return -1;
     }
 
-    Open_PDM_Filter_Init(&pdm_mic.filter);
+    // TODO: avoid four separate filters
+    for (uint i = 0; i < 4; i++) {
+        Open_PDM_Filter_Init(&pdm_mic.filters[i]);
+    }
 
     pio_sm_set_enabled(
         pdm_mic.config.pio,
@@ -149,7 +153,7 @@ int pdm_microphone_start() {
     dma_channel_transfer_to_buffer_now(
         pdm_mic.dma_channel,
         pdm_mic.raw_buffer[0],
-        pdm_mic.raw_buffer_size
+        pdm_mic.raw_buffer_size/2
     );
 
     pio_sm_set_enabled(
@@ -195,7 +199,7 @@ static void pdm_dma_handler() {
     dma_channel_transfer_to_buffer_now(
         pdm_mic.dma_channel,
         pdm_mic.raw_buffer[pdm_mic.raw_buffer_write_index],
-        pdm_mic.raw_buffer_size
+        pdm_mic.raw_buffer_size/2
     );
 
     if (pdm_mic.samples_ready_handler) {
@@ -208,20 +212,42 @@ void pdm_microphone_set_samples_ready_handler(pdm_samples_ready_handler_t handle
 }
 
 void pdm_microphone_set_filter_max_volume(uint8_t max_volume) {
-    pdm_mic.filter.MaxVolume = max_volume;
+    pdm_mic.filters[0].MaxVolume = max_volume;
 }
 
 void pdm_microphone_set_filter_gain(uint8_t gain) {
-    pdm_mic.filter.Gain = gain;
+    pdm_mic.filters[0].Gain = gain;
 }
 
 void pdm_microphone_set_filter_volume(uint16_t volume) {
     pdm_mic.filter_volume = volume;
 }
 
-int pdm_microphone_read(int16_t* buffer, size_t n_samples) {
-    int filter_stride = TMP_N_CHANNELS*(pdm_mic.filter.Fs / 1000); // buffer is interleaved!
-    n_samples = (n_samples / filter_stride) * filter_stride;
+uint8_t tmp_buffer[4][48 * (PDM_DECIMATION / 8) * 16]; // TMP
+
+// morton1 - extract even bits
+
+uint16_t morton1(uint32_t x)
+{
+    x = x & 0x55555555;
+    x = (x | (x >> 1)) & 0x33333333;
+    x = (x | (x >> 2)) & 0x0F0F0F0F;
+    x = (x | (x >> 4)) & 0x00FF00FF;
+    x = (x | (x >> 8)) & 0x0000FFFF;
+    return (uint16_t)x;
+}
+
+// morton2 - extract odd and even bits
+
+void morton2(uint16_t *x, uint16_t *y, uint32_t z)
+{
+    *x = morton1(z);
+    *y = morton1(z >> 1);
+}
+
+int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
+    int filter_stride = (pdm_mic.filters[0].Fs / 1000); // buffer is interleaved!
+    size_t n_samples = (raw_n_samples / filter_stride) * filter_stride;
 
     if (n_samples > pdm_mic.config.sample_buffer_size) {
         n_samples = pdm_mic.config.sample_buffer_size;
@@ -231,25 +257,34 @@ int pdm_microphone_read(int16_t* buffer, size_t n_samples) {
         return 0;
     }
 
-    for (int j = 0; j < TMP_N_CHANNELS; j++) {
-        uint8_t* in = pdm_mic.raw_buffer[pdm_mic.raw_buffer_read_index];
-        int16_t* out = buffer;
+    // de-interleave
+    uint32_t* read_raw_buffer = (uint32_t*)pdm_mic.raw_buffer[pdm_mic.raw_buffer_read_index];
+    uint16_t* edit_tmp_buffer_0 = (uint16_t*)tmp_buffer[0];
+    uint16_t* edit_tmp_buffer_1 = (uint16_t*)tmp_buffer[1];
+    for (uint i = 0; i < pdm_mic.raw_buffer_size/4; i++) { // *sizeof(uint8_t)/sizeof(uint32_t)
+        morton2(
+            edit_tmp_buffer_0 + i,
+            edit_tmp_buffer_1 + i,
+            *(read_raw_buffer + i)
+        );
+        // *(edit_tmp_buffer_0 + i) = *(read_raw_buffer + i); // pass through
+    }
 
-        // offset by channel #
-        in += j;
-        out += j;
+    for (int j = 0; j < 2; j++) {
+        uint8_t* in = (uint8_t*)tmp_buffer[j];
+        int16_t* out = buffer+j*raw_n_samples;
 
         for (int i = 0; i < n_samples; i += filter_stride) {
 #if PDM_DECIMATION == 64
-            Open_PDM_Filter_64(in, out, pdm_mic.filter_volume, &pdm_mic.filter);
+            Open_PDM_Filter_64(in, out+i*filter_stride, pdm_mic.filter_volume, &pdm_mic.filters[j]);
 #elif PDM_DECIMATION == 128
-            Open_PDM_Filter_128(in, out, pdm_mic.filter_volume, &pdm_mic.filter);
+            Open_PDM_Filter_128(in, out+i*filter_stride, pdm_mic.filter_volume, &pdm_mic.filters[j]);
 #else
             #error "Unsupported PDM_DECIMATION value!"
 #endif
 
             in += filter_stride * (PDM_DECIMATION / 8);
-            out += filter_stride;
+            // out += filter_stride;
         }
     }
 

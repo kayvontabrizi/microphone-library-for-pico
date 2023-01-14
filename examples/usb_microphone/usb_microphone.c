@@ -65,8 +65,10 @@ uint16_t usb_microphone_write(const void * data, uint16_t len)
 {
   // interleave samples
   uint16_t const* buf16 = (uint16_t const*) data;
-  for (uint8_t i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
-    tmp_sample_buffer[4*i] = buf16[i];
+  for (int j = 0; j < 2; j++) {
+    for (uint8_t i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
+      tmp_sample_buffer[j+4*i] = buf16[j*SAMPLE_BUFFER_SIZE+i];
+    }
   }
 
   tud_audio_write((uint8_t *)tmp_sample_buffer, sizeof(tmp_sample_buffer));

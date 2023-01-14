@@ -9,7 +9,7 @@
 .side_set 1
 .wrap_target
     nop side 0
-    in pins, 1 side 0
+    in pins, 2 side 0
     push iffull noblock side 1
     nop side 1
 .wrap
@@ -28,7 +28,7 @@ static inline void pdm_microphone_data_init(PIO pio, uint sm, uint offset, float
     pio_gpio_init(pio, clk_pin);
     pio_gpio_init(pio, data_pin);
 
-    sm_config_set_in_shift(&cfg, false, false, 8);
+    sm_config_set_in_shift(&cfg, false, false, 16);
     sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_RX);
 
     sm_config_set_clkdiv(&cfg, clk_div);
