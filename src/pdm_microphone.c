@@ -29,7 +29,7 @@ static struct {
     volatile int raw_buffer_read_index;
     uint raw_buffer_size;
     uint dma_irq;
-    TPDMFilter_InitStruct filters[4];
+    TPDMFilter_InitStruct filters[N_CHANNELS];
     uint16_t filter_volume;
     pdm_samples_ready_handler_t samples_ready_handler;
 } pdm_mic;
@@ -44,7 +44,7 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         return -1;
     }
 
-    pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * 2;
+    pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * N_CHANNELS;
 
     for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
         pdm_mic.raw_buffer[i] = malloc(pdm_mic.raw_buffer_size);
@@ -62,8 +62,17 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         return -1;
     }
 
-    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_program);
+#if N_CHANNELS == 1
+    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_n1_program);
+#elif N_CHANNELS == 2
+    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_n2_program);
+#elif N_CHANNELS == 4
+    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_n4_program);
+#else
+    #error "Unsupported N_CHANNELS value!"
+#endif
 
+    // TODO: PIO INSTRUCTION COUNT IS HARDCODED
     float clk_div = clock_get_hz(clk_sys) / (config->sample_rate * PDM_DECIMATION * 4.0);
 
     pdm_microphone_data_init(
@@ -72,12 +81,21 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         pio_sm_offset,
         clk_div,
         config->gpio_data,
-        config->gpio_clk
+        config->gpio_clk,
+        N_CHANNELS
     );
 
     dma_channel_config dma_channel_cfg = dma_channel_get_default_config(pdm_mic.dma_channel);
 
+#if N_CHANNELS == 1
+    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_8);
+#elif N_CHANNELS == 2
     channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_16);
+#elif N_CHANNELS == 4
+    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_32);
+#else
+    #error "Unsupported N_CHANNELS value!"
+#endif
     channel_config_set_read_increment(&dma_channel_cfg, false);
     channel_config_set_write_increment(&dma_channel_cfg, true);
     channel_config_set_dreq(&dma_channel_cfg, pio_get_dreq(config->pio, config->pio_sm, false));
@@ -89,12 +107,12 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         &dma_channel_cfg,
         pdm_mic.raw_buffer[0],
         &config->pio->rxf[config->pio_sm],
-        pdm_mic.raw_buffer_size,
+        pdm_mic.raw_buffer_size/N_CHANNELS,
         false
     );
 
     // TODO: avoid four separate filters
-    for (uint i = 0; i < 4; i++) {
+    for (uint i = 0; i < N_CHANNELS; i++) {
         pdm_mic.filters[i].Fs = config->sample_rate;
         pdm_mic.filters[i].LP_HZ = config->sample_rate / 2;
         pdm_mic.filters[i].HP_HZ = 10;
@@ -137,7 +155,7 @@ int pdm_microphone_start() {
     }
 
     // TODO: avoid four separate filters
-    for (uint i = 0; i < 4; i++) {
+    for (uint i = 0; i < N_CHANNELS; i++) {
         Open_PDM_Filter_Init(&pdm_mic.filters[i]);
     }
 
@@ -153,7 +171,7 @@ int pdm_microphone_start() {
     dma_channel_transfer_to_buffer_now(
         pdm_mic.dma_channel,
         pdm_mic.raw_buffer[0],
-        pdm_mic.raw_buffer_size/2
+        pdm_mic.raw_buffer_size/N_CHANNELS
     );
 
     pio_sm_set_enabled(
@@ -199,7 +217,7 @@ static void pdm_dma_handler() {
     dma_channel_transfer_to_buffer_now(
         pdm_mic.dma_channel,
         pdm_mic.raw_buffer[pdm_mic.raw_buffer_write_index],
-        pdm_mic.raw_buffer_size/2
+        pdm_mic.raw_buffer_size/N_CHANNELS
     );
 
     if (pdm_mic.samples_ready_handler) {
@@ -223,11 +241,8 @@ void pdm_microphone_set_filter_volume(uint16_t volume) {
     pdm_mic.filter_volume = volume;
 }
 
-uint8_t tmp_buffer[4][48 * (PDM_DECIMATION / 8) * 16]; // TMP
-
-// morton1 - extract even bits
-
-uint16_t morton1(uint32_t x)
+// morton_even - extract even bits
+uint16_t morton_even(uint32_t x)
 {
     x = x & 0x55555555;
     x = (x | (x >> 1)) & 0x33333333;
@@ -238,15 +253,37 @@ uint16_t morton1(uint32_t x)
 }
 
 // morton2 - extract odd and even bits
-
 void morton2(uint16_t *x, uint16_t *y, uint32_t z)
 {
-    *x = morton1(z);
-    *y = morton1(z >> 1);
+    *x = morton_even(z);
+    *y = morton_even(z >> 1);
 }
 
+// morton_fourth - extract every fourth bit
+uint8_t morton_fourth(uint32_t x)
+{
+    x = x & 0x11111111;
+    x = (x | (x >>  3)) & 0x03030303;
+    x = (x | (x >>  6)) & 0x000F000F;
+    x = (x | (x >> 12)) & 0x000000FF;
+    return (uint8_t)x;
+}
+
+// morton4 - de-interleave 4 channels
+void morton4(uint8_t *a, uint8_t *b, uint8_t *c, uint8_t *d, uint32_t z)
+{
+    *a = morton_fourth(z);
+    *b = morton_fourth(z >> 1);
+    *c = morton_fourth(z >> 2);
+    *d = morton_fourth(z >> 3);
+}
+
+// temporary de-interleaving buffer
+#define MAX_SAMPLE_RATE 192000
+uint8_t tmp_buffer[N_CHANNELS][(MAX_SAMPLE_RATE/1000) * (PDM_DECIMATION / 8)];
+
 int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
-    int filter_stride = (pdm_mic.filters[0].Fs / 1000); // buffer is interleaved!
+    int filter_stride = (pdm_mic.filters[0].Fs / 1000);
     size_t n_samples = (raw_n_samples / filter_stride) * filter_stride;
 
     if (n_samples > pdm_mic.config.sample_buffer_size) {
@@ -259,32 +296,45 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
 
     // de-interleave
     uint32_t* read_raw_buffer = (uint32_t*)pdm_mic.raw_buffer[pdm_mic.raw_buffer_read_index];
-    uint16_t* edit_tmp_buffer_0 = (uint16_t*)tmp_buffer[0];
-    uint16_t* edit_tmp_buffer_1 = (uint16_t*)tmp_buffer[1];
-    for (uint i = 0; i < pdm_mic.raw_buffer_size/4; i++) { // *sizeof(uint8_t)/sizeof(uint32_t)
+    void* edit_tmp_buffers[N_CHANNELS];
+    for (int j = 0; j < N_CHANNELS; j++) edit_tmp_buffers[j] = (void*)tmp_buffer[j];
+    for (uint i = 0; i < pdm_mic.raw_buffer_size*sizeof(uint8_t)/sizeof(uint32_t); i++) {
+#if N_CHANNELS == 1
+        *((uint32_t*)edit_tmp_buffers[0] + i) = *(read_raw_buffer + i); // pass through
+#elif N_CHANNELS == 2
         morton2(
-            edit_tmp_buffer_0 + i,
-            edit_tmp_buffer_1 + i,
+            (uint16_t*)edit_tmp_buffers[0] + i,
+            (uint16_t*)edit_tmp_buffers[1] + i,
             *(read_raw_buffer + i)
         );
-        // *(edit_tmp_buffer_0 + i) = *(read_raw_buffer + i); // pass through
+#elif N_CHANNELS == 4
+        morton4(
+            (uint8_t*)edit_tmp_buffers[0] + i,
+            (uint8_t*)edit_tmp_buffers[1] + i,
+            (uint8_t*)edit_tmp_buffers[2] + i,
+            (uint8_t*)edit_tmp_buffers[3] + i,
+            *(read_raw_buffer + i)
+        );
+#else
+        #error "Unsupported N_CHANNELS value!"
+#endif
     }
 
-    for (int j = 0; j < 2; j++) {
+    for (int j = 0; j < N_CHANNELS; j++) {
         uint8_t* in = (uint8_t*)tmp_buffer[j];
         int16_t* out = buffer+j*raw_n_samples;
 
         for (int i = 0; i < n_samples; i += filter_stride) {
 #if PDM_DECIMATION == 64
-            Open_PDM_Filter_64(in, out+i*filter_stride, pdm_mic.filter_volume, &pdm_mic.filters[j]);
+            Open_PDM_Filter_64(in, out, pdm_mic.filter_volume, &pdm_mic.filters[j]);
 #elif PDM_DECIMATION == 128
-            Open_PDM_Filter_128(in, out+i*filter_stride, pdm_mic.filter_volume, &pdm_mic.filters[j]);
+            Open_PDM_Filter_128(in, out, pdm_mic.filter_volume, &pdm_mic.filters[j]);
 #else
             #error "Unsupported PDM_DECIMATION value!"
 #endif
 
             in += filter_stride * (PDM_DECIMATION / 8);
-            // out += filter_stride;
+            out += filter_stride;
         }
     }
 

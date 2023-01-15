@@ -5,7 +5,16 @@
  * 
  */
 
-.program pdm_microphone_data
+.program pdm_microphone_data_n1
+.side_set 1
+.wrap_target
+    nop side 0
+    in pins, 1 side 0
+    push iffull noblock side 1
+    nop side 1
+.wrap
+
+.program pdm_microphone_data_n2
 .side_set 1
 .wrap_target
     nop side 0
@@ -14,13 +23,30 @@
     nop side 1
 .wrap
 
+.program pdm_microphone_data_n4
+.side_set 1
+.wrap_target
+    nop side 0
+    in pins, 4 side 0
+    push iffull noblock side 1
+    nop side 1
+.wrap
+
 % c-sdk {
 
-static inline void pdm_microphone_data_init(PIO pio, uint sm, uint offset, float clk_div, uint data_pin, uint clk_pin) {
-    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 4, false);
+static inline void pdm_microphone_data_init(
+    PIO pio, uint sm, uint offset, float clk_div, uint data_pin, uint clk_pin, uint n_channels
+) {
+    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, n_channels, false);
     pio_sm_set_consecutive_pindirs(pio, sm, clk_pin, 1, true);
 
-    pio_sm_config cfg = pdm_microphone_data_program_get_default_config(offset);
+    pio_sm_config cfg;
+    if (n_channels == 1)
+        cfg = pdm_microphone_data_n1_program_get_default_config(offset);
+    else if (n_channels == 2)
+        cfg = pdm_microphone_data_n2_program_get_default_config(offset);
+    else if (n_channels == 4)
+        cfg = pdm_microphone_data_n4_program_get_default_config(offset);
 
     sm_config_set_sideset_pins(&cfg, clk_pin);
     sm_config_set_in_pins(&cfg, data_pin);
@@ -28,7 +54,7 @@ static inline void pdm_microphone_data_init(PIO pio, uint sm, uint offset, float
     pio_gpio_init(pio, clk_pin);
     pio_gpio_init(pio, data_pin);
 
-    sm_config_set_in_shift(&cfg, false, false, 16);
+    sm_config_set_in_shift(&cfg, false, false, 8*n_channels);
     sm_config_set_fifo_join(&cfg, PIO_FIFO_JOIN_RX);
 
     sm_config_set_clkdiv(&cfg, clk_div);

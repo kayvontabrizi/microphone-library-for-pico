@@ -10,8 +10,7 @@
 
 #include "hardware/pio.h"
 
-// TODO: MUST MATCH CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX
-#define N_CHANNELS 4
+#define N_CHANNELS 2
 
 typedef void (*pdm_samples_ready_handler_t)(void);
 

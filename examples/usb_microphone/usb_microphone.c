@@ -59,18 +59,19 @@ void usb_microphone_set_tx_ready_handler(usb_microphone_tx_ready_handler_t handl
 }
 
 // tmp buffer (TODO: TMP)
-uint16_t tmp_sample_buffer[4*SAMPLE_BUFFER_SIZE];
+uint16_t tmp_sample_buffer[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX*SAMPLE_BUFFER_SIZE];
 
 uint16_t usb_microphone_write(const void * data, uint16_t len)
 {
   // interleave samples
   uint16_t const* buf16 = (uint16_t const*) data;
-  for (int j = 0; j < 2; j++) {
+  for (int j = 0; j < CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX; j++) {
     for (uint8_t i = 0; i < SAMPLE_BUFFER_SIZE; i++) {
-      tmp_sample_buffer[j+4*i] = buf16[j*SAMPLE_BUFFER_SIZE+i];
+      tmp_sample_buffer[j+CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX*i] = buf16[j*SAMPLE_BUFFER_SIZE+i];
     }
   }
 
+  // write interleaved samples
   tud_audio_write((uint8_t *)tmp_sample_buffer, sizeof(tmp_sample_buffer));
 }
 
@@ -338,7 +339,7 @@ bool tud_audio_tx_done_post_load_cb(uint8_t rhport, uint16_t n_bytes_copied, uin
   (void) cur_alt_setting;
 
   // initialize temporary buffer with zeros (TODO: TMP)
-  for (uint16_t i = 0; i < 4*SAMPLE_BUFFER_SIZE; i++) {
+  for (uint16_t i = 0; i < CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX*SAMPLE_BUFFER_SIZE; i++) {
     tmp_sample_buffer[i] = 0;
   }
 
