@@ -92,7 +92,7 @@ extern "C" {
 //--------------------------------------------------------------------
 
 // KAYVON: define the true sample rate here!
-#define SAMPLES_PER_MS 48
+#define SAMPLES_PER_MS 16
 
 // Have a look into audio_device.h for all configurations
 

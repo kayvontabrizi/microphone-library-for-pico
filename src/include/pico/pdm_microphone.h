@@ -10,7 +10,7 @@
 
 #include "hardware/pio.h"
 
-#define N_CHANNELS 2
+#define N_CHANNELS 4
 
 typedef void (*pdm_samples_ready_handler_t)(void);
 
