@@ -54,7 +54,7 @@
 #define SINCN            3
 #define DECIMATION_MAX 128
 #ifdef PICO_BUILD
-#define FILTER_GAIN     Param->Gain
+#define FILTER_GAIN     Filter->Gain
 #else
 #define FILTER_GAIN     16
 #endif
@@ -79,6 +79,12 @@ typedef struct {
 #ifdef PICO_BUILD
   uint8_t Gain;
 #endif
+  uint32_t div_const;
+  int64_t sub_const;
+  uint32_t sinc[DECIMATION_MAX * SINCN];
+  uint32_t sinc1[DECIMATION_MAX];
+  uint32_t sinc2[DECIMATION_MAX * 2];
+  uint32_t coef[SINCN][DECIMATION_MAX];
   /* Private */
   uint32_t Coef[SINCN];
   uint16_t FilterLen;
