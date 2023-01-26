@@ -1,0 +1,12 @@
+{
+    "cmake.buildBeforeRun": true,
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "cortex-debug.openocdPath": "/Users/ktabrizi/Documents/Development/repos/openocd/src/openocd",
+    "cmake.environment": {
+        "PICO_SDK_PATH":"../../pico-sdk"
+    },
+    "cmake.configureArgs": [
+        "-DPICO_BOARD=pico"
+    ],
+    "cmake.configureOnOpen": true
+}

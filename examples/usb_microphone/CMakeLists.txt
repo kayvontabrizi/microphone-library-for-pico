@@ -13,3 +13,9 @@ target_link_libraries(usb_microphone PRIVATE tinyusb_device tinyusb_board pico_p
 
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(usb_microphone)
+
+# this is apparently necessary for debugging
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    pico_enable_stdio_usb(usb_microphone 0)
+    pico_enable_stdio_uart(usb_microphone 1)
+endif (CMAKE_BUILD_TYPE STREQUAL "Debug")

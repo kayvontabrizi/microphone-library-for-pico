@@ -18,7 +18,7 @@
 
 // configuration
 const struct pdm_microphone_config config = {
-  .gpio_clk = 0,
+  .gpio_clk = 6,
   .gpio_data = 2,
   .pio = pio0,
   .pio_sm = 0,

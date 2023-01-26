@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Pico Debug",
+            "cwd": "${workspaceRoot}",
+            "executable": "${command:cmake.launchTargetPath}",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+            "gdbPath" : "arm-none-eabi-gdb",
+            "device": "RP2040",
+            "configFiles": [
+                "interface/bunny.cfg",
+                "target/rp2040.cfg"
+            ],
+            "svdFile": "/Users/ktabrizi/Documents/Development/repos/pico-sdk/src/rp2040/hardware_regs/rp2040.svd",
+            // "runToEntryPoint": "main",
+            "postRestartCommands": [
+                "continue"
+            ],
+            "searchDir": ["/Users/ktabrizi/Documents/Development/repos/openocd/tcl"],
+            "showDevDebugOutput": "raw"
+        }
+    ]
+}
