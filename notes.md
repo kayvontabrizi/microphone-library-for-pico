@@ -1,5 +1,13 @@
 # Notes
 
+## To-Do
+
+ - [x] bump to latest TinyUSB release
+ - [ ] figure out periodic distortion bug (occurs every ~24.5 seconds, regardless of sampling rate. happens simultaneously on multiple mics)
+ - [ ] substitute bit-shift interleave for byte-to-byte lookup table
+     + [ ] profile the two approaches
+     + [ ] this could be done without CPU via DMA — see [this thread](https://forums.raspberrypi.com/viewtopic.php?t=338287#p2025806)
+
 ## Usage
 
 ### Manual Building

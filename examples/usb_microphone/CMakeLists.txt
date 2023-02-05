@@ -18,4 +18,8 @@ pico_add_extra_outputs(usb_microphone)
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     pico_enable_stdio_usb(usb_microphone 0)
     pico_enable_stdio_uart(usb_microphone 1)
+    # see https://docs.tinyusb.org/en/latest/reference/getting_started.html
+    set(DEBUG, 1)
+    #set(LOG, 2)
+    #set(LOGGER, swo)
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")

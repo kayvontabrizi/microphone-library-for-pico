@@ -92,7 +92,7 @@ extern "C" {
 //--------------------------------------------------------------------
 
 // KAYVON: define the true sample rate here!
-#define SAMPLES_PER_MS 16
+#define SAMPLES_PER_MS 48
 
 // Have a look into audio_device.h for all configurations
 
@@ -108,6 +108,7 @@ extern "C" {
 #define CFG_TUD_AUDIO_FUNC_1_EP_IN_SZ_MAX                             CFG_TUD_AUDIO_EP_SZ_IN                  // Maximum EP IN size for all AS alternate settings used
 #define CFG_TUD_AUDIO_FUNC_1_EP_IN_SW_BUF_SZ                          CFG_TUD_AUDIO_EP_SZ_IN
 
+#define CFG_TUD_AUDIO_ENABLE_ENCODING                                 0
 // #define CFG_TUD_AUDIO_ENABLE_ENCODING                                 1
 // #define CFG_TUD_AUDIO_ENABLE_TYPE_I_ENCODING                          1
 // #define CFG_TUD_AUDIO_FUNC_1_CHANNEL_PER_FIFO_TX                      4 // TODO: seems like this has some interleave handling. maybe I can set it to 4...

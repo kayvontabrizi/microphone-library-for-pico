@@ -322,7 +322,7 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
 
     for (int j = 0; j < N_CHANNELS; j++) {
         uint8_t* in = (uint8_t*)tmp_buffer[j];
-        int16_t* out = buffer+j*raw_n_samples;
+        uint16_t* out = buffer+j*raw_n_samples; // TODO: int or uint?
 
         for (int i = 0; i < n_samples; i += filter_stride) {
 #if PDM_DECIMATION == 64
@@ -338,6 +338,7 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
         }
     }
 
+    // TODO: this shouldn't be necessary, it always gets set by interrupt handler
     pdm_mic.raw_buffer_read_index++;
 
     return n_samples;
