@@ -12,6 +12,8 @@
  * https://github.com/hathach/tinyusb/tree/master/examples/device/audio_test
  */
 
+#include "pico/critical_section.h"
+
 #include "pico/pdm_microphone.h"
 
 #include "usb_microphone.h"
@@ -27,6 +29,7 @@ const struct pdm_microphone_config config = {
 };
 
 // variables
+critical_section_t crit_sect;
 uint16_t sample_buffer[SAMPLE_BUFFER_SIZE*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX];
 
 // callback functions
@@ -35,6 +38,7 @@ void on_usb_microphone_tx_ready();
 
 int main(void)
 {
+  critical_section_init(&crit_sect);
   // initialize and start the PDM microphone
   pdm_microphone_init(&config);
   pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
@@ -67,5 +71,7 @@ void on_usb_microphone_tx_ready()
   // to be transmitted.
   //
   // Write local buffer to the USB microphone
+  critical_section_enter_blocking(&crit_sect);
   usb_microphone_write(sample_buffer, sizeof(sample_buffer)/CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX);
+  critical_section_exit(&crit_sect);
 }
