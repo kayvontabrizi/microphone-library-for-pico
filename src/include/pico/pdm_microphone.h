@@ -12,7 +12,7 @@
 
 #define N_CHANNELS 1
 
-typedef void (*pdm_samples_ready_handler_t)(void);
+typedef void (*pdm_samples_ready_handler_t)(const int);
 
 struct pdm_microphone_config {
     uint gpio_data;
@@ -22,6 +22,8 @@ struct pdm_microphone_config {
     uint sample_rate;
     uint sample_buffer_size;
 };
+
+static void pdm_dma_handler();
 
 int pdm_microphone_init(const struct pdm_microphone_config* config);
 void pdm_microphone_deinit();
@@ -34,6 +36,6 @@ void pdm_microphone_set_filter_max_volume(uint8_t max_volume);
 void pdm_microphone_set_filter_gain(uint8_t gain);
 void pdm_microphone_set_filter_volume(uint16_t volume);
 
-int pdm_microphone_read(int16_t* buffer, size_t n_samples);
+int pdm_microphone_read(int16_t* buffer, size_t n_samples, const int raw_buffer_read_index);
 
 #endif

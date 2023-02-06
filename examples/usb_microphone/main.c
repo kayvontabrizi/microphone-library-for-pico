@@ -56,13 +56,13 @@ int main(void)
   return 0;
 }
 
-void on_pdm_samples_ready()
+void on_pdm_samples_ready(const int raw_buffer_read_index)
 {
   // Callback from library when all the samples in the library
   // internal sample buffer are ready for reading.
   //
   // Read new samples into local buffer.
-  pdm_microphone_read(sample_buffer, SAMPLE_BUFFER_SIZE);
+  pdm_microphone_read(sample_buffer, SAMPLE_BUFFER_SIZE, raw_buffer_read_index);
 }
 
 void on_usb_microphone_tx_ready()

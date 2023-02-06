@@ -19,22 +19,26 @@
 #include "pico/pdm_microphone.h"
 
 #define PDM_DECIMATION       64
-#define PDM_RAW_BUFFER_COUNT 2
+#define PDM_RAW_BUFFER_COUNT 8
 
 static struct {
     struct pdm_microphone_config config;
-    int dma_channel;
-    uint8_t* raw_buffer[PDM_RAW_BUFFER_COUNT];
-    volatile int raw_buffer_write_index;
-    volatile int raw_buffer_read_index;
+    int dma_channel_a;
+    int dma_channel_b;
+    dma_channel_config dma_channel_a_cfg;
+    dma_channel_config dma_channel_b_cfg;
+    uint8_t* raw_buffers[PDM_RAW_BUFFER_COUNT];
+    volatile int raw_buffer_write_index_a;
+    volatile int raw_buffer_read_index_a;
+    volatile int raw_buffer_write_index_b;
+    volatile int raw_buffer_read_index_b;
     uint raw_buffer_size;
-    uint dma_irq;
+    uint dma_irq_a;
+    uint dma_irq_b;
     TPDMFilter_InitStruct filters[N_CHANNELS];
     uint16_t filter_volume;
     pdm_samples_ready_handler_t samples_ready_handler;
 } pdm_mic;
-
-static void pdm_dma_handler();
 
 int pdm_microphone_init(const struct pdm_microphone_config* config) {
     memset(&pdm_mic, 0x00, sizeof(pdm_mic));
@@ -47,16 +51,17 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
     pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * N_CHANNELS;
 
     for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
-        pdm_mic.raw_buffer[i] = malloc(pdm_mic.raw_buffer_size);
-        if (pdm_mic.raw_buffer[i] == NULL) {
+        pdm_mic.raw_buffers[i] = malloc(pdm_mic.raw_buffer_size);
+        if (pdm_mic.raw_buffers[i] == NULL) {
             pdm_microphone_deinit();
 
             return -1;   
         }
     }
 
-    pdm_mic.dma_channel = dma_claim_unused_channel(true);
-    if (pdm_mic.dma_channel < 0) {
+    pdm_mic.dma_channel_a = dma_claim_unused_channel(true);
+    pdm_mic.dma_channel_b = dma_claim_unused_channel(true);
+    if (pdm_mic.dma_channel_a < 0 || pdm_mic.dma_channel_b < 0) {
         pdm_microphone_deinit();
 
         return -1;
@@ -85,27 +90,46 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         N_CHANNELS
     );
 
-    dma_channel_config dma_channel_cfg = dma_channel_get_default_config(pdm_mic.dma_channel);
+    pdm_mic.dma_channel_a_cfg = dma_channel_get_default_config(pdm_mic.dma_channel_a);
+    pdm_mic.dma_channel_b_cfg = dma_channel_get_default_config(pdm_mic.dma_channel_b);
 
 #if N_CHANNELS == 1
-    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_8);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, DMA_SIZE_8);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, DMA_SIZE_8);
 #elif N_CHANNELS == 2
-    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_16);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, DMA_SIZE_16);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, DMA_SIZE_16);
 #elif N_CHANNELS == 4
-    channel_config_set_transfer_data_size(&dma_channel_cfg, DMA_SIZE_32);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, DMA_SIZE_32);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, DMA_SIZE_32);
 #else
     #error "Unsupported N_CHANNELS value!"
 #endif
-    channel_config_set_read_increment(&dma_channel_cfg, false);
-    channel_config_set_write_increment(&dma_channel_cfg, true);
-    channel_config_set_dreq(&dma_channel_cfg, pio_get_dreq(config->pio, config->pio_sm, false));
+    channel_config_set_read_increment(&pdm_mic.dma_channel_a_cfg, false);
+    channel_config_set_read_increment(&pdm_mic.dma_channel_b_cfg, false);
+    channel_config_set_write_increment(&pdm_mic.dma_channel_a_cfg, true);
+    channel_config_set_write_increment(&pdm_mic.dma_channel_b_cfg, true);
+    channel_config_set_dreq(&pdm_mic.dma_channel_a_cfg, pio_get_dreq(config->pio, config->pio_sm, false));
+    channel_config_set_dreq(&pdm_mic.dma_channel_b_cfg, pio_get_dreq(config->pio, config->pio_sm, false));
+    channel_config_set_chain_to(&pdm_mic.dma_channel_a_cfg, pdm_mic.dma_channel_b);
+    channel_config_set_chain_to(&pdm_mic.dma_channel_b_cfg, pdm_mic.dma_channel_a);
+    // example code: https://forums.raspberrypi.com/viewtopic.php?t=311306#p1861895
 
-    pdm_mic.dma_irq = DMA_IRQ_0;
+    pdm_mic.dma_irq_a = DMA_IRQ_0;
+    pdm_mic.dma_irq_b = DMA_IRQ_1;
 
     dma_channel_configure(
-        pdm_mic.dma_channel,
-        &dma_channel_cfg,
-        pdm_mic.raw_buffer[0],
+        pdm_mic.dma_channel_a,
+        &pdm_mic.dma_channel_a_cfg,
+        pdm_mic.raw_buffers[0],
+        &config->pio->rxf[config->pio_sm],
+        pdm_mic.raw_buffer_size/N_CHANNELS,
+        false
+    );
+    dma_channel_configure(
+        pdm_mic.dma_channel_b,
+        &pdm_mic.dma_channel_b_cfg,
+        pdm_mic.raw_buffers[1],
         &config->pio->rxf[config->pio_sm],
         pdm_mic.raw_buffer_size/N_CHANNELS,
         false
@@ -128,31 +152,31 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
 
 void pdm_microphone_deinit() {
     for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
-        if (pdm_mic.raw_buffer[i]) {
-            free(pdm_mic.raw_buffer[i]);
+        if (pdm_mic.raw_buffers[i]) {
+            free(pdm_mic.raw_buffers[i]);
 
-            pdm_mic.raw_buffer[i] = NULL;
+            pdm_mic.raw_buffers[i] = NULL;
         }
     }
 
-    if (pdm_mic.dma_channel > -1) {
-        dma_channel_unclaim(pdm_mic.dma_channel);
-
-        pdm_mic.dma_channel = -1;
+    if (pdm_mic.dma_channel_a > -1) {
+        dma_channel_unclaim(pdm_mic.dma_channel_a);
+        pdm_mic.dma_channel_a = -1;
+    }
+    if (pdm_mic.dma_channel_b > -1) {
+        dma_channel_unclaim(pdm_mic.dma_channel_b);
+        pdm_mic.dma_channel_b = -1;
     }
 }
 
 int pdm_microphone_start() {
-    irq_set_enabled(pdm_mic.dma_irq, true);
-    irq_set_exclusive_handler(pdm_mic.dma_irq, pdm_dma_handler);
+    irq_set_enabled(pdm_mic.dma_irq_a, true);
+    irq_set_exclusive_handler(pdm_mic.dma_irq_a, pdm_dma_handler);
+    irq_set_enabled(pdm_mic.dma_irq_b, true);
+    irq_set_exclusive_handler(pdm_mic.dma_irq_b, pdm_dma_handler);
 
-    if (pdm_mic.dma_irq == DMA_IRQ_0) {
-        dma_channel_set_irq0_enabled(pdm_mic.dma_channel, true);
-    } else if (pdm_mic.dma_irq == DMA_IRQ_1) {
-        dma_channel_set_irq1_enabled(pdm_mic.dma_channel, true);
-    } else {
-        return -1;
-    }
+    dma_channel_set_irq0_enabled(pdm_mic.dma_channel_a, true);
+    dma_channel_set_irq1_enabled(pdm_mic.dma_channel_b, true);
 
     // TODO: avoid four separate filters
     for (uint i = 0; i < N_CHANNELS; i++) {
@@ -165,14 +189,21 @@ int pdm_microphone_start() {
         true
     );
 
-    pdm_mic.raw_buffer_write_index = 0;
-    pdm_mic.raw_buffer_read_index = 0;
+    pdm_mic.raw_buffer_write_index_a = 0;
+    pdm_mic.raw_buffer_read_index_a = 0;
+    pdm_mic.raw_buffer_write_index_b = 1;
+    pdm_mic.raw_buffer_read_index_b = 1;
 
     dma_channel_transfer_to_buffer_now(
-        pdm_mic.dma_channel,
-        pdm_mic.raw_buffer[0],
+        pdm_mic.dma_channel_a,
+        pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_a],
         pdm_mic.raw_buffer_size/N_CHANNELS
     );
+    // dma_channel_transfer_to_buffer_now(
+    //     pdm_mic.dma_channel_b,
+    //     pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_b],
+    //     pdm_mic.raw_buffer_size/N_CHANNELS
+    // );
 
     pio_sm_set_enabled(
         pdm_mic.config.pio,
@@ -188,40 +219,72 @@ void pdm_microphone_stop() {
         false
     );
 
-    dma_channel_abort(pdm_mic.dma_channel);
+    dma_channel_abort(pdm_mic.dma_channel_a);
+    dma_channel_abort(pdm_mic.dma_channel_b);
 
-    if (pdm_mic.dma_irq == DMA_IRQ_0) {
-        dma_channel_set_irq0_enabled(pdm_mic.dma_channel, false);
-    } else if (pdm_mic.dma_irq == DMA_IRQ_1) {
-        dma_channel_set_irq1_enabled(pdm_mic.dma_channel, false);
-    }
+    dma_channel_set_irq0_enabled(pdm_mic.dma_channel_a, false);
+    dma_channel_set_irq1_enabled(pdm_mic.dma_channel_b, false);
 
-    irq_set_enabled(pdm_mic.dma_irq, false);
+    irq_set_enabled(pdm_mic.dma_irq_a, false);
+    irq_set_enabled(pdm_mic.dma_irq_b, false);
 }
 
 static void pdm_dma_handler() {
+    // identify channel
+    int channel;
+    if (dma_hw->ints0 & (1u << pdm_mic.dma_channel_a))
+        channel = pdm_mic.dma_channel_a;
+    else if (dma_hw->ints1 & (1u << pdm_mic.dma_channel_b))
+        channel = pdm_mic.dma_channel_b;
+    else __breakpoint();
+
     // clear IRQ
-    if (pdm_mic.dma_irq == DMA_IRQ_0) {
-        dma_hw->ints0 = (1u << pdm_mic.dma_channel);
-    } else if (pdm_mic.dma_irq == DMA_IRQ_1) {
-        dma_hw->ints1 = (1u << pdm_mic.dma_channel);
-    }
+    if (channel == pdm_mic.dma_channel_a) {
+        dma_hw->ints0 = (1u << channel);
+    } else if (channel == pdm_mic.dma_channel_b) {
+        dma_hw->ints1 = (1u << channel);
+    } else __breakpoint();
 
     // get the current buffer index
-    pdm_mic.raw_buffer_read_index = pdm_mic.raw_buffer_write_index;
+    int raw_buffer_read_index;
+    if (channel == pdm_mic.dma_channel_a)
+        raw_buffer_read_index = pdm_mic.raw_buffer_read_index_a = pdm_mic.raw_buffer_write_index_a;
+    else if (channel == pdm_mic.dma_channel_b)
+        raw_buffer_read_index = pdm_mic.raw_buffer_read_index_b = pdm_mic.raw_buffer_write_index_b;
 
     // get the next capture index to send the dma to start
-    pdm_mic.raw_buffer_write_index = (pdm_mic.raw_buffer_write_index + 1) % PDM_RAW_BUFFER_COUNT;
+    if (channel == pdm_mic.dma_channel_a)
+        pdm_mic.raw_buffer_write_index_a = (pdm_mic.raw_buffer_write_index_a + 2) % PDM_RAW_BUFFER_COUNT;
+    else if (channel == pdm_mic.dma_channel_b)
+        pdm_mic.raw_buffer_write_index_b = (pdm_mic.raw_buffer_write_index_b + 2) % PDM_RAW_BUFFER_COUNT;
 
-    // give the channel a new buffer to write to and re-trigger it
-    dma_channel_transfer_to_buffer_now(
-        pdm_mic.dma_channel,
-        pdm_mic.raw_buffer[pdm_mic.raw_buffer_write_index],
-        pdm_mic.raw_buffer_size/N_CHANNELS
-    );
+    // // give the channel a new buffer to write to and re-trigger it
+    // dma_channel_transfer_to_buffer_now(
+    //     channel,
+    //     pdm_mic.raw_buffers[raw_buffer_write_index],
+    //     pdm_mic.raw_buffer_size/N_CHANNELS
+    // );
+    if (channel == pdm_mic.dma_channel_a)
+        dma_channel_configure(
+            pdm_mic.dma_channel_a,
+            &pdm_mic.dma_channel_a_cfg,
+            pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_a],
+            &pdm_mic.config.pio->rxf[pdm_mic.config.pio_sm],
+            pdm_mic.raw_buffer_size/N_CHANNELS,
+            false
+        );
+    else if (channel == pdm_mic.dma_channel_b)
+        dma_channel_configure(
+            pdm_mic.dma_channel_b,
+            &pdm_mic.dma_channel_b_cfg,
+            pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_b],
+            &pdm_mic.config.pio->rxf[pdm_mic.config.pio_sm],
+            pdm_mic.raw_buffer_size/N_CHANNELS,
+            false
+        );
 
     if (pdm_mic.samples_ready_handler) {
-        pdm_mic.samples_ready_handler();
+        pdm_mic.samples_ready_handler(raw_buffer_read_index);
     }
 }
 
@@ -282,7 +345,7 @@ void morton4(uint8_t *a, uint8_t *b, uint8_t *c, uint8_t *d, uint32_t z)
 #define MAX_SAMPLE_RATE 192000
 uint8_t tmp_buffer[N_CHANNELS][(MAX_SAMPLE_RATE/1000) * (PDM_DECIMATION / 8)];
 
-int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
+int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples, const int raw_buffer_read_index) {
     int filter_stride = (pdm_mic.filters[0].Fs / 1000);
     size_t n_samples = (raw_n_samples / filter_stride) * filter_stride;
 
@@ -290,12 +353,8 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
         n_samples = pdm_mic.config.sample_buffer_size;
     }
 
-    if (pdm_mic.raw_buffer_write_index == pdm_mic.raw_buffer_read_index) {
-        return 0;
-    }
-
     // de-interleave
-    uint32_t* read_raw_buffer = (uint32_t*)pdm_mic.raw_buffer[pdm_mic.raw_buffer_read_index];
+    uint32_t* read_raw_buffer = (uint32_t*)pdm_mic.raw_buffers[raw_buffer_read_index];
     void* edit_tmp_buffers[N_CHANNELS];
     for (int j = 0; j < N_CHANNELS; j++) edit_tmp_buffers[j] = (void*)tmp_buffer[j];
     for (uint i = 0; i < pdm_mic.raw_buffer_size*sizeof(uint8_t)/sizeof(uint32_t); i++) {
@@ -337,9 +396,6 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
             out += filter_stride;
         }
     }
-
-    // TODO: this shouldn't be necessary, it always gets set by interrupt handler
-    pdm_mic.raw_buffer_read_index++;
 
     return n_samples;
 }

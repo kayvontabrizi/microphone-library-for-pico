@@ -338,11 +338,6 @@ bool tud_audio_tx_done_post_load_cb(uint8_t rhport, uint16_t n_bytes_copied, uin
   (void) ep_in;
   (void) cur_alt_setting;
 
-  // initialize temporary buffer with zeros (TODO: TMP)
-  for (uint16_t i = 0; i < CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX*SAMPLE_BUFFER_SIZE; i++) {
-    tmp_sample_buffer[i] = 0;
-  }
-
   return true;
 }
 
