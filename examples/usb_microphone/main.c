@@ -56,13 +56,12 @@ int main(void)
   return 0;
 }
 
-void on_pdm_samples_ready(const int raw_buffer_read_index)
+void on_pdm_samples_ready()
 {
   // Callback from library when all the samples in the library
   // internal sample buffer are ready for reading.
   //
-  // Read new samples into local buffer.
-  pdm_microphone_read(sample_buffer, SAMPLE_BUFFER_SIZE, raw_buffer_read_index);
+  // Do nothing.
 }
 
 void on_usb_microphone_tx_ready()
@@ -72,6 +71,7 @@ void on_usb_microphone_tx_ready()
   //
   // Write local buffer to the USB microphone
   critical_section_enter_blocking(&crit_sect);
+  pdm_microphone_read(sample_buffer, SAMPLE_BUFFER_SIZE);
   usb_microphone_write(sample_buffer, sizeof(sample_buffer)/CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX);
   critical_section_exit(&crit_sect);
 }

@@ -19,7 +19,7 @@
 #include "pico/pdm_microphone.h"
 
 #define PDM_DECIMATION       64
-#define PDM_RAW_BUFFER_COUNT 2
+#define PDM_RAW_BUFFER_COUNT 16
 
 static struct {
     struct pdm_microphone_config config;
@@ -27,7 +27,7 @@ static struct {
     int dma_channel_b;
     dma_channel_config dma_channel_a_cfg;
     dma_channel_config dma_channel_b_cfg;
-    uint8_t* raw_buffers[PDM_RAW_BUFFER_COUNT];
+    uint8_t* raw_buffer;
     volatile int raw_buffer_write_index_a;
     volatile int raw_buffer_read_index_a;
     volatile int raw_buffer_write_index_b;
@@ -50,13 +50,10 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
 
     pdm_mic.raw_buffer_size = config->sample_buffer_size * (PDM_DECIMATION / 8) * N_CHANNELS;
 
-    for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
-        pdm_mic.raw_buffers[i] = malloc(pdm_mic.raw_buffer_size);
-        if (pdm_mic.raw_buffers[i] == NULL) {
-            pdm_microphone_deinit();
-
-            return -1;   
-        }
+    pdm_mic.raw_buffer = malloc(PDM_RAW_BUFFER_COUNT * pdm_mic.raw_buffer_size);
+    if (pdm_mic.raw_buffer == NULL) {
+        pdm_microphone_deinit();
+        return -1;
     }
 
     pdm_mic.dma_channel_a = dma_claim_unused_channel(true);
@@ -121,7 +118,7 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
     dma_channel_configure(
         pdm_mic.dma_channel_a,
         &pdm_mic.dma_channel_a_cfg,
-        pdm_mic.raw_buffers[0],
+        pdm_mic.raw_buffer,
         &config->pio->rxf[config->pio_sm],
         pdm_mic.raw_buffer_size/N_CHANNELS,
         false
@@ -129,7 +126,7 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
     dma_channel_configure(
         pdm_mic.dma_channel_b,
         &pdm_mic.dma_channel_b_cfg,
-        pdm_mic.raw_buffers[1],
+        pdm_mic.raw_buffer,
         &config->pio->rxf[config->pio_sm],
         pdm_mic.raw_buffer_size/N_CHANNELS,
         false
@@ -151,12 +148,10 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
 }
 
 void pdm_microphone_deinit() {
-    for (int i = 0; i < PDM_RAW_BUFFER_COUNT; i++) {
-        if (pdm_mic.raw_buffers[i]) {
-            free(pdm_mic.raw_buffers[i]);
+    if (pdm_mic.raw_buffer) {
+        free(pdm_mic.raw_buffer);
 
-            pdm_mic.raw_buffers[i] = NULL;
-        }
+        pdm_mic.raw_buffer = NULL;
     }
 
     if (pdm_mic.dma_channel_a > -1) {
@@ -196,7 +191,7 @@ int pdm_microphone_start() {
 
     dma_channel_transfer_to_buffer_now(
         pdm_mic.dma_channel_a,
-        pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_a],
+        pdm_mic.raw_buffer + pdm_mic.raw_buffer_size*pdm_mic.raw_buffer_write_index_a,
         pdm_mic.raw_buffer_size/N_CHANNELS
     );
     // dma_channel_transfer_to_buffer_now(
@@ -245,13 +240,6 @@ static void pdm_dma_handler() {
         dma_hw->ints1 = (1u << channel);
     } else __breakpoint();
 
-    // get the current buffer index
-    int raw_buffer_read_index;
-    if (channel == pdm_mic.dma_channel_a)
-        raw_buffer_read_index = pdm_mic.raw_buffer_read_index_a = pdm_mic.raw_buffer_write_index_a;
-    else if (channel == pdm_mic.dma_channel_b)
-        raw_buffer_read_index = pdm_mic.raw_buffer_read_index_b = pdm_mic.raw_buffer_write_index_b;
-
     // get the next capture index to send the dma to start
     if (channel == pdm_mic.dma_channel_a)
         pdm_mic.raw_buffer_write_index_a = (pdm_mic.raw_buffer_write_index_a + 2) % PDM_RAW_BUFFER_COUNT;
@@ -268,7 +256,7 @@ static void pdm_dma_handler() {
         dma_channel_configure(
             pdm_mic.dma_channel_a,
             &pdm_mic.dma_channel_a_cfg,
-            pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_a],
+            pdm_mic.raw_buffer + pdm_mic.raw_buffer_size*pdm_mic.raw_buffer_write_index_a,
             &pdm_mic.config.pio->rxf[pdm_mic.config.pio_sm],
             pdm_mic.raw_buffer_size/N_CHANNELS,
             false
@@ -277,14 +265,14 @@ static void pdm_dma_handler() {
         dma_channel_configure(
             pdm_mic.dma_channel_b,
             &pdm_mic.dma_channel_b_cfg,
-            pdm_mic.raw_buffers[pdm_mic.raw_buffer_write_index_b],
+            pdm_mic.raw_buffer + pdm_mic.raw_buffer_size*pdm_mic.raw_buffer_write_index_b,
             &pdm_mic.config.pio->rxf[pdm_mic.config.pio_sm],
             pdm_mic.raw_buffer_size/N_CHANNELS,
             false
         );
 
     if (pdm_mic.samples_ready_handler) {
-        pdm_mic.samples_ready_handler(raw_buffer_read_index);
+        pdm_mic.samples_ready_handler();
     }
 }
 
@@ -345,7 +333,8 @@ void morton4(uint8_t *a, uint8_t *b, uint8_t *c, uint8_t *d, uint32_t z)
 #define MAX_SAMPLE_RATE 192000
 uint8_t tmp_buffer[N_CHANNELS][(MAX_SAMPLE_RATE/1000) * (PDM_DECIMATION / 8)];
 
-int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples, const int raw_buffer_read_index) {
+int raw_buffer_read_index = 0;
+int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
     int filter_stride = (pdm_mic.filters[0].Fs / 1000);
     size_t n_samples = (raw_n_samples / filter_stride) * filter_stride;
 
@@ -353,8 +342,25 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples, const int raw_buf
         n_samples = pdm_mic.config.sample_buffer_size;
     }
 
+    // compute max write index and read-to-write distance
+    const int raw_buffer_write_index = (pdm_mic.raw_buffer_write_index_a > pdm_mic.raw_buffer_write_index_a) ?
+        pdm_mic.raw_buffer_write_index_a : pdm_mic.raw_buffer_write_index_b;
+    int write_to_read = raw_buffer_read_index-raw_buffer_write_index;
+    write_to_read = (write_to_read < -PDM_RAW_BUFFER_COUNT/2) ? write_to_read + PDM_RAW_BUFFER_COUNT : write_to_read;
+    write_to_read = (write_to_read > +PDM_RAW_BUFFER_COUNT/2) ? write_to_read - PDM_RAW_BUFFER_COUNT : write_to_read;
+
+    // if write buffer gets too close to read buffer
+    if (write_to_read > -2 && write_to_read < 2) {
+        // USB IS SLOWER
+        raw_buffer_read_index = (raw_buffer_write_index-2+PDM_RAW_BUFFER_COUNT)%PDM_RAW_BUFFER_COUNT;
+        // // USB IS FASTER
+        // raw_buffer_read_index = (raw_buffer_write_index+2+PDM_RAW_BUFFER_COUNT)%PDM_RAW_BUFFER_COUNT;
+        // // IF YOU DON'T KNOW
+        // raw_buffer_read_index = (raw_buffer_write_index+PDM_RAW_BUFFER_COUNT/2)%PDM_RAW_BUFFER_COUNT;
+    }
+
     // de-interleave
-    uint32_t* read_raw_buffer = (uint32_t*)pdm_mic.raw_buffers[raw_buffer_read_index];
+    uint32_t* read_raw_buffer = (uint32_t*)(pdm_mic.raw_buffer + pdm_mic.raw_buffer_size*raw_buffer_read_index);
     void* edit_tmp_buffers[N_CHANNELS];
     for (int j = 0; j < N_CHANNELS; j++) edit_tmp_buffers[j] = (void*)tmp_buffer[j];
     for (uint i = 0; i < pdm_mic.raw_buffer_size*sizeof(uint8_t)/sizeof(uint32_t); i++) {
@@ -396,6 +402,8 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples, const int raw_buf
             out += filter_stride;
         }
     }
+
+    raw_buffer_read_index = (raw_buffer_read_index + 1) % PDM_RAW_BUFFER_COUNT;
 
     return n_samples;
 }

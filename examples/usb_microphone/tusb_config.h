@@ -33,7 +33,7 @@ extern "C" {
 ////////////////////////////
 
 // KAYVON: define the true sample rate here!
-#define MS_PER_FRAME 2 // # of milliseconds per USB poll (crashes after > 2)
+#define MS_PER_FRAME 1 // # of milliseconds per USB poll (crashes after > 2)
 #define SAMPLES_PER_MS 48 // true sample rate (per millisecond)
 
 // AUDIO simple descriptor (UAC2) for 4 microphone input
