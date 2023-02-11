@@ -18,6 +18,6 @@ typedef void (*usb_microphone_tx_ready_handler_t)(void);
 void usb_microphone_init();
 void usb_microphone_set_tx_ready_handler(usb_microphone_tx_ready_handler_t handler);
 void usb_microphone_task();
-uint16_t usb_microphone_write(const void * data, uint16_t len);
+uint16_t usb_microphone_write(const void * data);
 
 #endif

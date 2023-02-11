@@ -72,6 +72,6 @@ void on_usb_microphone_tx_ready()
   // Write local buffer to the USB microphone
   critical_section_enter_blocking(&crit_sect);
   pdm_microphone_read(sample_buffer, SAMPLE_BUFFER_SIZE);
-  usb_microphone_write(sample_buffer, sizeof(sample_buffer)/CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX);
+  usb_microphone_write(sample_buffer);
   critical_section_exit(&crit_sect);
 }

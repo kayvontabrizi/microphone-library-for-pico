@@ -18,9 +18,6 @@
 
 #include "pico/pdm_microphone.h"
 
-#define PDM_DECIMATION       64
-#define PDM_RAW_BUFFER_COUNT 16
-
 static struct {
     struct pdm_microphone_config config;
     int dma_channel_a;
@@ -29,9 +26,7 @@ static struct {
     dma_channel_config dma_channel_b_cfg;
     uint8_t* raw_buffer;
     volatile int raw_buffer_write_index_a;
-    volatile int raw_buffer_read_index_a;
     volatile int raw_buffer_write_index_b;
-    volatile int raw_buffer_read_index_b;
     uint raw_buffer_size;
     uint dma_irq_a;
     uint dma_irq_b;
@@ -64,15 +59,17 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
         return -1;
     }
 
+    const pio_program_t* pdm_microphone_program;
 #if N_CHANNELS == 1
-    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_n1_program);
+    pdm_microphone_program = &pdm_microphone_data_n1_program;
 #elif N_CHANNELS == 2
-    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_n2_program);
+    pdm_microphone_program = &pdm_microphone_data_n2_program;
 #elif N_CHANNELS == 4
-    uint pio_sm_offset = pio_add_program(config->pio, &pdm_microphone_data_n4_program);
+    pdm_microphone_program = &pdm_microphone_data_n4_program;
 #else
     #error "Unsupported N_CHANNELS value!"
 #endif
+    uint pio_sm_offset = pio_add_program(config->pio, pdm_microphone_program);
 
     // TODO: PIO INSTRUCTION COUNT IS HARDCODED
     float clk_div = clock_get_hz(clk_sys) / (config->sample_rate * PDM_DECIMATION * 4.0);
@@ -90,18 +87,19 @@ int pdm_microphone_init(const struct pdm_microphone_config* config) {
     pdm_mic.dma_channel_a_cfg = dma_channel_get_default_config(pdm_mic.dma_channel_a);
     pdm_mic.dma_channel_b_cfg = dma_channel_get_default_config(pdm_mic.dma_channel_b);
 
+    enum dma_channel_transfer_size dma_size;
 #if N_CHANNELS == 1
-    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, DMA_SIZE_8);
-    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, DMA_SIZE_8);
+    dma_size = DMA_SIZE_8;
 #elif N_CHANNELS == 2
-    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, DMA_SIZE_16);
-    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, DMA_SIZE_16);
+    dma_size = DMA_SIZE_16;
 #elif N_CHANNELS == 4
-    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, DMA_SIZE_32);
-    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, DMA_SIZE_32);
+    dma_size = DMA_SIZE_32;
 #else
     #error "Unsupported N_CHANNELS value!"
 #endif
+
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_a_cfg, dma_size);
+    channel_config_set_transfer_data_size(&pdm_mic.dma_channel_b_cfg, dma_size);
     channel_config_set_read_increment(&pdm_mic.dma_channel_a_cfg, false);
     channel_config_set_read_increment(&pdm_mic.dma_channel_b_cfg, false);
     channel_config_set_write_increment(&pdm_mic.dma_channel_a_cfg, true);
@@ -185,9 +183,7 @@ int pdm_microphone_start() {
     );
 
     pdm_mic.raw_buffer_write_index_a = 0;
-    pdm_mic.raw_buffer_read_index_a = 0;
     pdm_mic.raw_buffer_write_index_b = 1;
-    pdm_mic.raw_buffer_read_index_b = 1;
 
     dma_channel_transfer_to_buffer_now(
         pdm_mic.dma_channel_a,
@@ -333,7 +329,14 @@ void morton4(uint8_t *a, uint8_t *b, uint8_t *c, uint8_t *d, uint32_t z)
 #define MAX_SAMPLE_RATE 192000
 uint8_t tmp_buffer[N_CHANNELS][(MAX_SAMPLE_RATE/1000) * (PDM_DECIMATION / 8)];
 
-int raw_buffer_read_index = 0;
+#ifndef USB_IS_SLOWER
+int raw_buffer_read_index = PDM_RAW_BUFFER_COUNT/2;
+#elif   USB_IS_SLOWER == true
+int raw_buffer_read_index = PDM_RAW_BUFFER_COUNT-2;
+#elif   USB_IS_SLOWER == false
+int raw_buffer_read_index = 2;
+#endif
+
 int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
     int filter_stride = (pdm_mic.filters[0].Fs / 1000);
     size_t n_samples = (raw_n_samples / filter_stride) * filter_stride;
@@ -351,12 +354,13 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
 
     // if write buffer gets too close to read buffer
     if (write_to_read > -2 && write_to_read < 2) {
-        // USB IS SLOWER
+#ifndef USB_IS_SLOWER
+        raw_buffer_read_index = (raw_buffer_write_index+PDM_RAW_BUFFER_COUNT/2)%PDM_RAW_BUFFER_COUNT;
+#elif   USB_IS_SLOWER == true
         raw_buffer_read_index = (raw_buffer_write_index-2+PDM_RAW_BUFFER_COUNT)%PDM_RAW_BUFFER_COUNT;
-        // // USB IS FASTER
-        // raw_buffer_read_index = (raw_buffer_write_index+2+PDM_RAW_BUFFER_COUNT)%PDM_RAW_BUFFER_COUNT;
-        // // IF YOU DON'T KNOW
-        // raw_buffer_read_index = (raw_buffer_write_index+PDM_RAW_BUFFER_COUNT/2)%PDM_RAW_BUFFER_COUNT;
+#elif   USB_IS_SLOWER == false
+        raw_buffer_read_index = (raw_buffer_write_index+2+PDM_RAW_BUFFER_COUNT)%PDM_RAW_BUFFER_COUNT;
+#endif
     }
 
     // de-interleave

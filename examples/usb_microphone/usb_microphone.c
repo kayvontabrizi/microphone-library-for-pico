@@ -61,8 +61,7 @@ void usb_microphone_set_tx_ready_handler(usb_microphone_tx_ready_handler_t handl
 // tmp buffer (TODO: TMP)
 uint16_t tmp_sample_buffer[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX*SAMPLE_BUFFER_SIZE];
 
-uint16_t usb_microphone_write(const void * data, uint16_t len)
-{
+uint16_t usb_microphone_write(const void * data) {
   // interleave samples
   uint16_t const* buf16 = (uint16_t const*) data;
   for (int j = 0; j < CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX; j++) {

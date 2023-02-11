@@ -10,7 +10,10 @@
 
 #include "hardware/pio.h"
 
-#define N_CHANNELS 1
+#define USB_IS_SLOWER true // this seems to be the preference, but if unsure, leave undefined!
+#define N_CHANNELS 1 // # of channels to process (will register as 4-channel device regardless)
+#define PDM_DECIMATION       64 // # of PDM samples per PCM samples
+#define PDM_RAW_BUFFER_COUNT 64 // # of buffer sections (> 16 to avoid frequent pops)
 
 typedef void (*pdm_samples_ready_handler_t)(void);
 
