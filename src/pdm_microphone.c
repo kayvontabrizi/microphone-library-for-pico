@@ -394,7 +394,9 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
         uint16_t* out = buffer+j*raw_n_samples; // TODO: int or uint?
 
         for (int i = 0; i < n_samples; i += filter_stride) {
-#if PDM_DECIMATION == 64
+#if PDM_DECIMATION == 48
+            Open_PDM_Filter_48(in, out, pdm_mic.filter_volume, &pdm_mic.filters[j]);
+#elif PDM_DECIMATION == 64
             Open_PDM_Filter_64(in, out, pdm_mic.filter_volume, &pdm_mic.filters[j]);
 #elif PDM_DECIMATION == 128
             Open_PDM_Filter_128(in, out, pdm_mic.filter_volume, &pdm_mic.filters[j]);
