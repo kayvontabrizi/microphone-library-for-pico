@@ -8,7 +8,7 @@
      + [x] success at 88 kHz (in single mic device configuration)
  - [x] there seems to be a DC offset in the output signal. figure out why!
      + looks like sigma-delta ADCs often have DC offset. datasheet says to expect a 3% (of full range) offset
- - [ ] move USB-poll processing into `post_load_cb` and only read buffer during `pre_load_cb` (careful with critical sections)
+ - [x] move USB-poll processing into `post_load_cb` and only read buffer during `pre_load_cb` (careful with critical sections)
  - [ ] run four mics at 96 kHz
      + [ ] accelerate LUT-based filtering through DMA (see [this thread](https://forums.raspberrypi.com/viewtopic.php?t=338287#p2025806))
      + [ ] upgrade PIO program to produce deinterleaved bytes

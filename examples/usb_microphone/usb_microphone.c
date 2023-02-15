@@ -36,7 +36,9 @@ uint8_t clkValid;
 audio_control_range_2_n_t(1) volumeRng[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX+1]; 			// Volume range state
 audio_control_range_4_n_t(1) sampleFreqRng; 						// Sample frequency range state
 
+// initialize handlers
 static usb_microphone_tx_ready_handler_t usb_microphone_tx_ready_handler = NULL;
+static usb_microphone_tx_done_handler_t usb_microphone_tx_done_handler = NULL;
 
 /*------------- MAIN -------------*/
 void usb_microphone_init()
@@ -53,14 +55,18 @@ void usb_microphone_init()
   sampleFreqRng.subrange[0].bRes = 0;
 }
 
-void usb_microphone_set_tx_ready_handler(usb_microphone_tx_ready_handler_t handler)
-{
+void usb_microphone_set_tx_ready_handler(usb_microphone_tx_ready_handler_t handler){
   usb_microphone_tx_ready_handler = handler;
+}
+
+void usb_microphone_set_tx_done_handler(usb_microphone_tx_done_handler_t handler){
+  usb_microphone_tx_done_handler = handler;
 }
 
 // tmp buffer (TODO: TMP)
 uint16_t tmp_sample_buffer[CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX*SAMPLE_BUFFER_SIZE];
 
+// write input data to tinyusb device fifo
 uint16_t usb_microphone_write(const void * data) {
   // interleave samples
   uint16_t const* buf16 = (uint16_t const*) data;
@@ -74,8 +80,7 @@ uint16_t usb_microphone_write(const void * data) {
   tud_audio_write((uint8_t *)tmp_sample_buffer, sizeof(tmp_sample_buffer));
 }
 
-void usb_microphone_task()
-{
+void usb_microphone_task() {
   tud_task();
 }
 
@@ -321,10 +326,7 @@ bool tud_audio_tx_done_pre_load_cb(uint8_t rhport, uint8_t itf, uint8_t ep_in, u
   (void) ep_in;
   (void) cur_alt_setting;
 
-  if (usb_microphone_tx_ready_handler)
-  {
-    usb_microphone_tx_ready_handler();
-  }
+  if (usb_microphone_tx_ready_handler) usb_microphone_tx_ready_handler();
 
   return true;
 }
@@ -336,6 +338,8 @@ bool tud_audio_tx_done_post_load_cb(uint8_t rhport, uint16_t n_bytes_copied, uin
   (void) itf;
   (void) ep_in;
   (void) cur_alt_setting;
+
+  if (usb_microphone_tx_done_handler) usb_microphone_tx_done_handler();
 
   return true;
 }

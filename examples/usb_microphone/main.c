@@ -34,11 +34,14 @@ uint16_t sample_buffer[SAMPLE_BUFFER_SIZE*CFG_TUD_AUDIO_FUNC_1_N_CHANNELS_TX];
 
 // callback functions
 void on_pdm_samples_ready();
-void on_usb_microphone_tx_ready();
+void on_usb_microphone_post_tx();
+void on_usb_microphone_pre_tx();
 
-int main(void)
-{
+// main entrypoint
+int main(void) {
+  // initialize critical section objects
   critical_section_init(&crit_sect);
+
   // initialize and start the PDM microphone
   pdm_microphone_init(&config);
   pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
@@ -46,32 +49,34 @@ int main(void)
 
   // initialize the USB microphone interface
   usb_microphone_init();
-  usb_microphone_set_tx_ready_handler(on_usb_microphone_tx_ready);
+  usb_microphone_set_tx_ready_handler(on_usb_microphone_pre_tx);
+  usb_microphone_set_tx_done_handler(on_usb_microphone_post_tx);
 
+  // loop indefinitely
   while (1) {
-    // run the USB microphone task continuously
+    // handle any USB mic tasks
     usb_microphone_task();
   }
 
+  // return success
   return 0;
 }
 
-void on_pdm_samples_ready()
-{
-  // Callback from library when all the samples in the library
-  // internal sample buffer are ready for reading.
-  //
-  // Do nothing.
-}
+// PDM DMA completion callback
+void on_pdm_samples_ready() {}
 
-void on_usb_microphone_tx_ready()
-{
-  // Callback from TinyUSB library when all data is ready
-  // to be transmitted.
-  //
-  // Write local buffer to the USB microphone
+// tinyUSB post-transmission callback
+void on_usb_microphone_post_tx() {
+  // process PDM samples and populate local buffer
   critical_section_enter_blocking(&crit_sect);
   pdm_microphone_read(sample_buffer, SAMPLE_BUFFER_SIZE);
+  critical_section_exit(&crit_sect);
+}
+
+// tinyUSB pre-transmission callback for loading transmission buffers
+void on_usb_microphone_pre_tx() {
+  // write local buffer to tinyUSB device fifo
+  critical_section_enter_blocking(&crit_sect);
   usb_microphone_write(sample_buffer);
   critical_section_exit(&crit_sect);
 }
