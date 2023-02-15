@@ -4,13 +4,15 @@
 
  - [x] bump to latest TinyUSB release
  - [x] figure out periodic distortion bug (occurs every ~24.5 seconds, regardless of sampling rate. happens simultaneously on multiple mics)
- - [ ] run mic with 48x decimation, then at 96 kHz sample rate
+ - [x] run mic with 48x decimation, ~~then at 96 kHz sample rate~~
      + [x] success at 88 kHz (in single mic device configuration)
- - [ ] there seems to be a DC offset in the output signal. figure out why!
- - [ ] substitute bit-shift interleave for byte-to-byte lookup table
-     + [ ] profile the two approaches
-     + [ ] this could be done without CPU via DMA — see [this thread](https://forums.raspberrypi.com/viewtopic.php?t=338287#p2025806)
-     + [ ] this should probably just be done via PIO registers
+ - [x] there seems to be a DC offset in the output signal. figure out why!
+     + looks like sigma-delta ADCs often have DC offset. datasheet says to expect a 3% (of full range) offset
+ - [ ] move USB-poll processing into `post_load_cb` and only read buffer during `pre_load_cb` (careful with critical sections)
+ - [ ] run four mics at 96 kHz
+     + [ ] accelerate LUT-based filtering through DMA (see [this thread](https://forums.raspberrypi.com/viewtopic.php?t=338287#p2025806))
+     + [ ] upgrade PIO program to produce deinterleaved bytes
+     + [ ] increase USB-poll processing time by alternating between cores
 
 ## Miscellaneous
 
@@ -23,6 +25,8 @@ Basic timing profiling shows that `usb_microphone_write` takes ~40us (as 4 chann
 ### Manual Building
 
 To build the UF2 binaries for the Pico microphone, just run `build.sh` from the repo's root directory. Connect a Pico (by USB) while holding the "BOOTSEL" button and drag the relevant UF2 (e.g. `build/examples/usb_microphone/usb_microphone.uf2`) to the Pico drive to flash the program.
+
+_Note: To force a release build after debugging, run `./build.sh -DCMAKE_BUILD_TYPE="Release"`._
 
 ### Debugging
 
@@ -45,6 +49,10 @@ To debug, follow these steps:
  4. Build the target (`[USB Microphone]`).
  5. Run the debugger (press `F5`).
  6. Once running, plug in the Pico microphone to use as USB device.
+
+If VSCode complains that
+> The build configurations generated do not contain the active build configuration.
+run `CMake: Delete Cache and Reconfigure` from the command panel.
 
 _Note: To build and flash normally, first disconnect the PicoProbe's USB connection._
 

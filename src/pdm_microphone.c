@@ -367,16 +367,18 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
     uint32_t* read_raw_buffer = (uint32_t*)(pdm_mic.raw_buffer + pdm_mic.raw_buffer_size*raw_buffer_read_index);
     void* edit_tmp_buffers[N_CHANNELS];
     for (int j = 0; j < N_CHANNELS; j++) edit_tmp_buffers[j] = (void*)tmp_buffer[j];
-    for (uint i = 0; i < pdm_mic.raw_buffer_size*sizeof(uint8_t)/sizeof(uint32_t); i++) {
 #if N_CHANNELS == 1
-        *((uint32_t*)edit_tmp_buffers[0] + i) = *(read_raw_buffer + i); // pass through
+    // pass through
 #elif N_CHANNELS == 2
+    for (uint i = 0; i < pdm_mic.raw_buffer_size*sizeof(uint8_t)/sizeof(uint32_t); i++) {
         morton2(
             (uint16_t*)edit_tmp_buffers[0] + i,
             (uint16_t*)edit_tmp_buffers[1] + i,
             *(read_raw_buffer + i)
         );
+    }
 #elif N_CHANNELS == 4
+    for (uint i = 0; i < pdm_mic.raw_buffer_size*sizeof(uint8_t)/sizeof(uint32_t); i++) {
         morton4(
             (uint8_t*)edit_tmp_buffers[0] + i,
             (uint8_t*)edit_tmp_buffers[1] + i,
@@ -384,13 +386,17 @@ int pdm_microphone_read(int16_t* buffer, size_t raw_n_samples) {
             (uint8_t*)edit_tmp_buffers[3] + i,
             *(read_raw_buffer + i)
         );
-#else
-        #error "Unsupported N_CHANNELS value!"
-#endif
     }
+#else
+#error "Unsupported N_CHANNELS value!"
+#endif
 
     for (int j = 0; j < N_CHANNELS; j++) {
+#if N_CHANNELS == 1
+        uint8_t* in = (uint8_t*)read_raw_buffer;
+#else
         uint8_t* in = (uint8_t*)tmp_buffer[j];
+#endif
         uint16_t* out = buffer+j*raw_n_samples; // TODO: int or uint?
 
         for (int i = 0; i < n_samples; i += filter_stride) {
